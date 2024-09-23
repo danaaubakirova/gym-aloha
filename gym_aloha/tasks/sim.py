@@ -217,3 +217,92 @@ class InsertionTask(BimanualViperXTask):
         if pin_touched:  # successful insertion
             reward = 4
         return reward
+
+class MergedTask(BimanualViperXTask):
+    def __init__(self, task='insertion', random=None):
+        super().__init__(random=random)
+        self.task = task.lower()  # Task can be 'insertion' or 'transfer'
+        self.max_reward = 4 if self.task == 'insertion' else 2  # Reward based on task
+
+    def initialize_episode(self, physics):
+        """Sets the state of the environment at the start of each episode."""
+        with physics.reset_context():
+            # Initialize the robot arm (first 16 elements in qpos)
+            physics.named.data.qpos[:16] = START_ARM_POSE  # Robot arm positions
+            np.copyto(physics.data.ctrl, START_ARM_POSE)   # Robot arm control positions
+
+            # Ensure BOX_POSE is not None
+            assert BOX_POSE[0] is not None, "BOX_POSE has not been initialized."
+
+            # Set peg, socket, and cube positions in qpos
+            # The first 9 values of BOX_POSE are for the peg (position and orientation)
+            # The next 9 values are for the socket (position and orientation)
+            # The final 9 values are for the cube (position and orientation)
+            physics.named.data.qpos[16:30] = BOX_POSE[0][:14]  # Peg and socket positions (first 14 values of BOX_POSE)
+            physics.named.data.qpos[30:39] = BOX_POSE[0][14:]  # Cube position (last 9 values of BOX_POSE)
+
+        # Call the superclass method to complete the initialization
+        super().initialize_episode(physics)
+
+    @staticmethod
+    def get_env_state(physics):
+        """Get the environment state with both tasks initialized."""
+        # Return the state of both tasks (peg/socket and cube)
+        peg_state = physics.data.qpos[16:30].copy()  # Insertion task state
+        cube_state = physics.data.qpos[30:39].copy()  # Transfer task state
+        return np.concatenate([peg_state, cube_state])
+
+    def get_reward(self, physics):
+        """Return reward based on the active task (either insertion or transfer)."""
+        if self.task == 'insertion':
+            return self.get_insertion_reward(physics)
+        elif self.task == 'transfer':
+            return self.get_transfer_reward(physics)
+        else:
+            raise ValueError(f"Unknown task: {self.task}")
+
+    def get_insertion_reward(self, physics):
+        """Reward logic for the insertion task."""
+        all_contact_pairs = self._get_all_contact_pairs(physics)
+        # Logic to check contact between peg and socket
+        peg_touch_socket = (
+            ("red_peg", "socket-1") in all_contact_pairs
+            or ("red_peg", "socket-2") in all_contact_pairs
+            or ("red_peg", "socket-3") in all_contact_pairs
+            or ("red_peg", "socket-4") in all_contact_pairs
+        )
+        pin_touched = ("red_peg", "pin") in all_contact_pairs
+
+        reward = 0
+        # Reward for touching socket or successfully inserting
+        if peg_touch_socket:
+            reward = 3
+        if pin_touched:
+            reward = 4
+        return reward
+
+    def get_transfer_reward(self, physics):
+        """Reward logic for the transfer task."""
+        all_contact_pairs = self._get_all_contact_pairs(physics)
+        # Logic to check contact between cube and gripper
+        cube_touch_gripper = ("red_box", "vx300s_right/10_right_gripper_finger") in all_contact_pairs
+        cube_placed_goal = ("red_box", "goal_region") in all_contact_pairs  # Assuming goal region
+
+        reward = 0
+        if cube_touch_gripper:  # If cube is being grasped
+            reward = 1
+        if cube_placed_goal:  # If cube is successfully placed
+            reward = 2
+        return reward
+
+    def _get_all_contact_pairs(self, physics):
+        """Helper method to extract all contact pairs from physics data."""
+        all_contact_pairs = []
+        for i_contact in range(physics.data.ncon):
+            id_geom_1 = physics.data.contact[i_contact].geom1
+            id_geom_2 = physics.data.contact[i_contact].geom2
+            name_geom_1 = physics.model.id2name(id_geom_1, "geom")
+            name_geom_2 = physics.model.id2name(id_geom_2, "geom")
+            contact_pair = (name_geom_1, name_geom_2)
+            all_contact_pairs.append(contact_pair)
+        return all_contact_pairs

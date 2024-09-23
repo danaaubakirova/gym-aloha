@@ -10,12 +10,12 @@ from gym_aloha.constants import (
     DT,
     JOINTS,
 )
-from gym_aloha.tasks.sim import BOX_POSE, InsertionTask, TransferCubeTask
+from gym_aloha.tasks.sim import BOX_POSE, InsertionTask, TransferCubeTask, MergedTask 
 from gym_aloha.tasks.sim_end_effector import (
     InsertionEndEffectorTask,
     TransferCubeEndEffectorTask,
 )
-from gym_aloha.utils import sample_box_pose, sample_insertion_pose
+from gym_aloha.utils import sample_box_pose, sample_insertion_pose, sample_insertion_and_transfer_pose
 
 
 class AlohaEnv(gym.Env):
@@ -31,6 +31,7 @@ class AlohaEnv(gym.Env):
         observation_height=480,
         visualization_width=640,
         visualization_height=480,
+        task_type="insertion"
     ):
         super().__init__()
         self.task = task
@@ -40,8 +41,9 @@ class AlohaEnv(gym.Env):
         self.observation_height = observation_height
         self.visualization_width = visualization_width
         self.visualization_height = visualization_height
+        self.task_type = task_type
 
-        self._env = self._make_env_task(self.task)
+        self._env = self._make_env_task(self.task, self.task_type)
 
         if self.obs_type == "state":
             raise NotImplementedError()
@@ -93,7 +95,7 @@ class AlohaEnv(gym.Env):
         width, height = (
             (self.visualization_width, self.visualization_height)
             if visualize
-            else (self.observation_width, self.observation_height)
+            else (self.observatioxn_width, self.observation_height)
         )
         # if mode in ["visualize", "human"]:
         #     height, width = self.visualize_height, self.visualize_width
@@ -105,8 +107,8 @@ class AlohaEnv(gym.Env):
         image = self._env.physics.render(height=height, width=width, camera_id="top")
         return image
 
-    def _make_env_task(self, task_name):
-        # time limit is controlled by StepCounter in env factory
+    def _make_env_task(self, task_name, task_type="insertion"):
+    # time limit is controlled by StepCounter in env factory
         time_limit = float("inf")
 
         if "transfer_cube" in task_name:
@@ -116,7 +118,14 @@ class AlohaEnv(gym.Env):
         elif "insertion" in task_name:
             xml_path = ASSETS_DIR / "bimanual_viperx_insertion.xml"
             physics = mujoco.Physics.from_xml_path(str(xml_path))
+            
             task = InsertionTask()
+        elif "merged" in task_name:
+            # Use the provided task_type instead of relying on the task name
+            assert self.task_type in ["insertion", "transfer"], f"Unknown task_type: {task_type}"
+            xml_path = ASSETS_DIR / "bimanual_viperx_combined.xml"  # Combined XML for both tasks
+            physics = mujoco.Physics.from_xml_path(str(xml_path))
+            task = MergedTask(task=self.task_type)  # Pass task_type to the task
         elif "end_effector_transfer_cube" in task_name:
             raise NotImplementedError()
             xml_path = ASSETS_DIR / "bimanual_viperx_end_effector_transfer_cube.xml"
@@ -160,6 +169,11 @@ class AlohaEnv(gym.Env):
             BOX_POSE[0] = sample_box_pose(seed)  # used in sim reset
         elif "insertion" in self.task:
             BOX_POSE[0] = np.concatenate(sample_insertion_pose(seed))  # used in sim reset
+        elif "merged" in self.task:
+        # Handle both tasks by sampling all objects (peg, socket, cube)
+            peg_pose, socket_pose, cube_pose = sample_insertion_and_transfer_pose(seed)
+            # BOX_POSE needs to be updated with both peg/socket and cube
+            BOX_POSE[0] = np.concatenate([peg_pose, socket_pose, cube_pose])
         else:
             raise ValueError(self.task)
 

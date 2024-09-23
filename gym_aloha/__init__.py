@@ -7,7 +7,7 @@ register(
     # Even after seeding, the rendered observations are slightly different,
     # so we set `nondeterministic=True` to pass `check_env` tests
     nondeterministic=True,
-    kwargs={"obs_type": "pixels", "task": "insertion"},
+    kwargs={"obs_type": "pixels", "task": "insertion", "task_type": "insertion"},
 )
 
 register(
@@ -17,5 +17,13 @@ register(
     # Even after seeding, the rendered observations are slightly different,
     # so we set `nondeterministic=True` to pass `check_env` tests
     nondeterministic=True,
-    kwargs={"obs_type": "pixels", "task": "transfer_cube"},
+    kwargs={"obs_type": "pixels", "task": "transfer_cube", "task_type": "insertion"},
+)
+
+register(
+    id="gym_aloha/AlohaMerged-v0",
+    entry_point="gym_aloha.env:AlohaEnv",
+    max_episode_steps=300,
+    nondeterministic=True,
+    kwargs={"obs_type": "pixels", "task": "merged", "task_type": "insertion"},  # Switch task within the env
 )
